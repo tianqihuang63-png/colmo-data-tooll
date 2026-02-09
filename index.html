@@ -1,0 +1,2666 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COLMO 数据处理工具</title>
+    <!-- 库加载检查 -->
+    <script>
+        // 检查库是否加载的辅助函数
+        function waitForLibrary(libraryName, checkFunc, timeout = 10000) {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                function check() {
+                    if (checkFunc()) {
+                        console.log(`✅ ${libraryName} 已加载`);
+                        resolve();
+                    } else if (Date.now() - startTime > timeout) {
+                        reject(new Error(`${libraryName} 加载超时`));
+                    } else {
+                        setTimeout(check, 100);
+                    }
+                }
+                check();
+            });
+        }
+
+        // 页面加载完成后检查所有库
+        window.addEventListener('DOMContentLoaded', async () => {
+            console.log('=== 页面加载完成，检查库文件 ===');
+            console.log('XLSX:', typeof XLSX);
+            console.log('JSZip:', typeof JSZip);
+            console.log('saveAs:', typeof saveAs);
+
+            try {
+                await waitForLibrary('XLSX', () => typeof XLSX !== 'undefined');
+                await waitForLibrary('JSZip', () => typeof JSZip !== 'undefined' || typeof window.JSZip !== 'undefined');
+                await waitForLibrary('FileSaver', () => typeof saveAs !== 'undefined');
+                console.log('✅ 所有必需的库已加载完成');
+            } catch (error) {
+                console.error('❌ 库加载失败:', error);
+                alert('部分库加载失败，某些功能可能无法使用。\n\n请检查网络连接或刷新页面重试。');
+            }
+        });
+    </script>
+    <!-- 本地库文件 - 不依赖 CDN，确保 100% 可用 -->
+    <script src="xlsx.full.min.js"></script>
+    <script src="jszip.min.js"></script>
+    <script src="FileSaver.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600;700&family=Playfair+Display:wght@400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-black: #0A0A0A;
+            --secondary-black: #1A1A1A;
+            --pure-white: #FFFFFF;
+            --off-white: #FAFAFA;
+            --light-gray: #E8E8E8;
+            --medium-gray: #A0A0A0;
+            --dark-gray: #4A4A4A;
+            --gold-accent: #C8A96C;
+            --gold-light: #D4BC7E;
+            --gold-dark: #B89B5F;
+            --success: #1A1A1A;
+            --border-subtle: rgba(26, 26, 26, 0.08);
+            --shadow-subtle: 0 2px 8px rgba(0, 0, 0, 0.04);
+            --shadow-elegant: 0 8px 32px rgba(0, 0, 0, 0.06);
+        }
+
+        body {
+            font-family: 'Noto Serif SC', 'Playfair Display', serif;
+            background: linear-gradient(135deg, #FAFAFA 0%, #F0F0F0 100%);
+            color: var(--secondary-black);
+            line-height: 1.7;
+            min-height: 100vh;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Animated background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(var(--border-subtle) 1px, transparent 1px),
+                linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+            background-size: 60px 60px;
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 60px 40px;
+            position: relative;
+            z-index: 1;
+            animation: fadeInUp 0.8s ease-out;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 60px;
+            animation: fadeInDown 1s ease-out;
+        }
+
+        .header-title {
+            font-family: 'Playfair Display', 'Noto Serif SC', serif;
+            font-size: 48px;
+            font-weight: 300;
+            color: var(--primary-black);
+            margin-bottom: 16px;
+            letter-spacing: 0.02em;
+            position: relative;
+            display: inline-block;
+        }
+
+        .header-title::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--gold-accent), transparent);
+        }
+
+        .header-subtitle {
+            font-size: 15px;
+            font-weight: 400;
+            color: var(--medium-gray);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        /* Function Selector */
+        .function-selector {
+            text-align: center;
+            margin-bottom: 50px;
+            animation: fadeIn 1.2s ease-out;
+        }
+
+        .selector-label {
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            color: var(--medium-gray);
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+
+        .function-select-wrapper {
+            display: inline-block;
+            position: relative;
+        }
+
+        .function-select {
+            width: 100%;
+            min-width: 400px;
+            padding: 16px 24px;
+            font-family: 'Noto Serif SC', serif;
+            font-size: 15px;
+            font-weight: 400;
+            border: 1px solid var(--light-gray);
+            background: var(--pure-white);
+            color: var(--secondary-black);
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            appearance: none;
+            border-radius: 0;
+            position: relative;
+            letter-spacing: 0.02em;
+        }
+
+        .function-select:hover {
+            border-color: var(--gold-accent);
+            box-shadow: 0 0 0 3px rgba(200, 169, 108, 0.08);
+        }
+
+        .function-select:focus {
+            outline: none;
+            border-color: var(--gold-accent);
+            box-shadow: 0 0 0 3px rgba(200, 169, 108, 0.12);
+        }
+
+        .function-select-wrapper::after {
+            content: '';
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 8px;
+            height: 8px;
+            border-right: 2px solid var(--gold-accent);
+            border-bottom: 2px solid var(--gold-accent);
+            transform: translateY(-60%) rotate(45deg);
+            pointer-events: none;
+            transition: transform 0.3s ease;
+        }
+
+        .function-select-wrapper:hover::after {
+            transform: translateY(-60%) rotate(225deg);
+        }
+
+        /* Card */
+        .card {
+            background: var(--pure-white);
+            border: 1px solid var(--border-subtle);
+            box-shadow: var(--shadow-elegant);
+            overflow: hidden;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+            transform: translateY(30px);
+            animation: cardEnter 0.8s ease-out forwards;
+        }
+
+        .card:hover {
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .card-header {
+            padding: 32px 40px;
+            border-bottom: 1px solid var(--border-subtle);
+            background: linear-gradient(180deg, var(--off-white) 0%, var(--pure-white) 100%);
+            position: relative;
+        }
+
+        .card-header::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--light-gray), transparent);
+        }
+
+        .card-title {
+            font-family: 'Playfair Display', 'Noto Serif SC', serif;
+            font-size: 26px;
+            font-weight: 400;
+            color: var(--primary-black);
+            letter-spacing: 0.02em;
+        }
+
+        .card-body {
+            padding: 40px;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 1px solid var(--light-gray);
+            padding: 60px 40px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            margin-bottom: 30px;
+            background: var(--pure-white);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-area::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(200, 169, 108, 0.03), transparent);
+            transition: left 0.6s ease;
+        }
+
+        .upload-area:hover::before {
+            left: 100%;
+        }
+
+        .upload-area:hover {
+            border-color: var(--gold-accent);
+            box-shadow: 0 0 0 1px var(--gold-accent), 0 8px 24px rgba(200, 169, 108, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .upload-area.dragover {
+            border-color: var(--gold-accent);
+            background: linear-gradient(135deg, rgba(200, 169, 108, 0.02) 0%, rgba(200, 169, 108, 0.05) 100%);
+            box-shadow: 0 0 0 2px var(--gold-accent), 0 12px 32px rgba(200, 169, 108, 0.12);
+        }
+
+        .upload-icon {
+            font-size: 56px;
+            margin-bottom: 24px;
+            opacity: 0.3;
+            transition: all 0.4s ease;
+            display: inline-block;
+        }
+
+        .upload-area:hover .upload-icon {
+            opacity: 0.6;
+            transform: scale(1.1);
+        }
+
+        .upload-text {
+            font-size: 16px;
+            font-weight: 400;
+            color: var(--secondary-black);
+            margin-bottom: 12px;
+            letter-spacing: 0.02em;
+        }
+
+        .upload-hint {
+            font-size: 13px;
+            color: var(--medium-gray);
+            letter-spacing: 0.03em;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .file-list {
+            margin-top: 20px;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 16px 20px;
+            background: var(--off-white);
+            border: 1px solid var(--light-gray);
+            margin-bottom: 12px;
+            transition: all 0.3s ease;
+            animation: slideInRight 0.4s ease-out;
+        }
+
+        .file-item:hover {
+            background: var(--pure-white);
+            border-color: var(--gold-accent);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        .file-icon {
+            font-size: 28px;
+            margin-right: 16px;
+            opacity: 0.4;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--secondary-black);
+            margin-bottom: 4px;
+        }
+
+        .file-size {
+            font-size: 12px;
+            color: var(--medium-gray);
+        }
+
+        .file-remove {
+            color: var(--medium-gray);
+            cursor: pointer;
+            padding: 8px 12px;
+            font-size: 18px;
+            transition: all 0.3s ease;
+            opacity: 0.5;
+        }
+
+        .file-remove:hover {
+            color: var(--secondary-black);
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        /* Button */
+        .btn {
+            display: inline-block;
+            padding: 14px 32px;
+            font-family: 'Noto Serif SC', serif;
+            font-size: 14px;
+            font-weight: 400;
+            border: none;
+            cursor: pointer;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            text-align: center;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width 0.6s ease, height 0.6s ease;
+        }
+
+        .btn:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+
+        .btn-primary {
+            background: var(--secondary-black);
+            color: var(--pure-white);
+            border: 1px solid var(--secondary-black);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-black);
+            border-color: var(--primary-black);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .btn-primary:disabled {
+            background: var(--light-gray);
+            border-color: var(--light-gray);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-primary:disabled::before {
+            display: none;
+        }
+
+        .btn-secondary {
+            background: var(--pure-white);
+            border: 1px solid var(--light-gray);
+            color: var(--secondary-black);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--gold-accent);
+            color: var(--gold-accent);
+            box-shadow: 0 2px 12px rgba(200, 169, 108, 0.1);
+        }
+
+        .btn-success {
+            background: var(--secondary-black);
+            color: var(--pure-white);
+            border: 1px solid var(--secondary-black);
+        }
+
+        .btn-success:hover {
+            background: var(--primary-black);
+            border-color: var(--primary-black);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-download-single {
+            background: var(--gold-accent);
+            color: var(--pure-white);
+            border: 1px solid var(--gold-accent);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Noto Serif SC', serif;
+        }
+
+        .btn-download-single:hover {
+            background: var(--gold-dark);
+            border-color: var(--gold-dark);
+            box-shadow: 0 2px 8px rgba(200, 169, 108, 0.3);
+            transform: translateY(-1px);
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            margin-top: 32px;
+            display: none;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 13px;
+            font-weight: 400;
+            letter-spacing: 0.03em;
+            color: var(--dark-gray);
+        }
+
+        .progress-bar-bg {
+            height: 2px;
+            background: var(--light-gray);
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--secondary-black), var(--gold-accent));
+            transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            transform: translateX(-100%);
+            animation: shimmer 1.5s infinite;
+        }
+
+        /* Results */
+        .results {
+            margin-top: 32px;
+            display: none;
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        .results-summary {
+            background: var(--off-white);
+            border: 1px solid var(--light-gray);
+            padding: 24px;
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .results-summary::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 3px;
+            height: 100%;
+            background: var(--secondary-black);
+        }
+
+        .results-summary.warning::before {
+            background: var(--gold-accent);
+        }
+
+        .result-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border-subtle);
+            transition: all 0.3s ease;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-item:hover {
+            padding-left: 8px;
+            border-bottom-color: var(--light-gray);
+        }
+
+        .result-label {
+            font-size: 14px;
+            color: var(--dark-gray);
+        }
+
+        .result-value {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--secondary-black);
+        }
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .result-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        /* Config Section */
+        /* Config Section */
+        .config-section {
+            margin-top: 32px;
+            padding: 28px;
+            background: var(--off-white);
+            border: 1px solid var(--border-subtle);
+        }
+
+        .config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--light-gray);
+        }
+
+        .config-title {
+            font-family: 'Playfair Display', 'Noto Serif SC', serif;
+            font-size: 18px;
+            font-weight: 400;
+            color: var(--secondary-black);
+            letter-spacing: 0.02em;
+        }
+
+        .config-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .config-actions .btn {
+            padding: 10px 20px;
+            font-size: 12px;
+        }
+
+        /* Merchant List */
+        .merchant-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .merchant-card {
+            background: var(--pure-white);
+            border: 1px solid var(--light-gray);
+            padding: 20px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .merchant-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 3px;
+            height: 100%;
+            background: var(--secondary-black);
+            transform: scaleY(0);
+            transition: transform 0.3s ease;
+        }
+
+        .merchant-card:hover {
+            border-color: var(--gold-accent);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+            transform: translateY(-2px);
+        }
+
+        .merchant-card:hover::before {
+            transform: scaleY(1);
+        }
+
+        .merchant-name {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--secondary-black);
+            margin-bottom: 8px;
+        }
+
+        .merchant-store-count {
+            font-size: 13px;
+            color: var(--medium-gray);
+        }
+
+        .merchant-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .merchant-actions .btn {
+            padding: 6px 12px;
+            font-size: 11px;
+        }
+
+        /* Alert Messages */
+        .alert {
+            padding: 16px 20px;
+            border-radius: 0;
+            margin-bottom: 20px;
+            font-size: 14px;
+            border-left: 3px solid;
+            background: var(--off-white);
+        }
+
+        .alert-success {
+            border-left-color: var(--success);
+            color: var(--dark-gray);
+        }
+
+        .alert-error {
+            border-left-color: var(--secondary-black);
+            color: var(--dark-gray);
+        }
+
+        .alert-warning {
+            border-left-color: var(--gold-accent);
+            color: var(--dark-gray);
+        }
+
+        /* Rules Table */
+        .rules-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+
+        .rules-table th,
+        .rules-table td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .rules-table th {
+            background: var(--off-white);
+            font-weight: 400;
+            font-size: 12px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--dark-gray);
+            border-bottom: 2px solid var(--light-gray);
+        }
+
+        .rules-table tr:hover td {
+            background: var(--off-white);
+        }
+
+        .rules-table input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid var(--light-gray);
+            font-family: 'Noto Serif SC', serif;
+            font-size: 13px;
+            background: var(--pure-white);
+            transition: all 0.3s ease;
+        }
+
+        .rules-table input:focus {
+            outline: none;
+            border-color: var(--gold-accent);
+            box-shadow: 0 0 0 2px rgba(200, 169, 108, 0.08);
+        }
+
+        /* Hidden by default */
+        .hidden {
+            display: none;
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--white);
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+
+        .modal-body {
+            padding: 24px;
+        }
+
+        .modal-footer {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        /* Alert */
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .alert-success {
+            background: #F6FFED;
+            border: 1px solid #B7EB8F;
+            color: #389E0D;
+        }
+
+        .alert-error {
+            background: #FFF2F0;
+            border: 1px solid #FFCCC7;
+            color: #CF1322;
+        }
+
+        .alert-warning {
+            background: #FFFBE6;
+            border: 1px solid #FFE58F;
+            color: #D48806;
+        }
+
+        /* Loading */
+        .loading {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--light-gray);
+            border-top-color: var(--gold-accent);
+            border-radius: 50%;
+            animation: elegantSpin 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+
+        /* Animations */
+        @keyframes elegantSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes cardEnter {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* Merchant Edit Form */
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 400;
+            margin-bottom: 10px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--dark-gray);
+        }
+
+        .form-input, .form-textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--light-gray);
+            font-family: 'Noto Serif SC', serif;
+            font-size: 14px;
+            background: var(--pure-white);
+            color: var(--secondary-black);
+            transition: all 0.3s ease;
+        }
+
+        .form-input:focus, .form-textarea:focus {
+            outline: none;
+            border-color: var(--gold-accent);
+            box-shadow: 0 0 0 3px rgba(200, 169, 108, 0.08);
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .store-list {
+            max-height: 240px;
+            overflow-y: auto;
+            border: 1px solid var(--light-gray);
+            background: var(--pure-white);
+        }
+
+        .store-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .store-list::-webkit-scrollbar-track {
+            background: var(--off-white);
+        }
+
+        .store-list::-webkit-scrollbar-thumb {
+            background: var(--light-gray);
+            border-radius: 3px;
+        }
+
+        .store-list::-webkit-scrollbar-thumb:hover {
+            background: var(--medium-gray);
+        }
+
+        .store-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+            transition: all 0.3s ease;
+        }
+
+        .store-item:hover {
+            background: var(--off-white);
+        }
+
+        .store-item:last-child {
+            border-bottom: none;
+        }
+
+        /* Modal Overlay */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 10, 10, 0.6);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        /* Modal Content */
+        .modal-content {
+            background: var(--pure-white);
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.2);
+            animation: modalSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-40px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 30px 20px;
+            }
+
+            .header-title {
+                font-size: 32px;
+            }
+
+            .card-body {
+                padding: 24px;
+            }
+
+            .upload-area {
+                padding: 40px 24px;
+            }
+
+            .function-select {
+                min-width: 100%;
+            }
+
+            .btn {
+                width: 100%;
+                margin-bottom: 12px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header-title {
+                font-size: 28px;
+            }
+
+            .card-body {
+                padding: 20px;
+            }
+
+            .upload-area {
+                padding: 30px 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="header-title">COLMO 数据处理工具</div>
+            <div class="header-subtitle">企微用户数据映射与商户拆分</div>
+        </div>
+
+        <!-- Function Selector -->
+        <div class="function-selector">
+            <div class="selector-label">选择功能</div>
+            <div class="function-select-wrapper">
+                <select class="function-select" id="functionSelect">
+                    <option value="mapping">标签映射分类</option>
+                    <option value="split">商户拆分</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Function 1: Tag Mapping -->
+        <div id="mappingFunction">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">标签映射分类</div>
+                </div>
+                <div class="card-body">
+                    <!-- Upload Section -->
+                    <div id="mappingUploadSection">
+                        <div class="upload-area" id="sourceFileArea">
+                            <div class="upload-icon">⌬</div>
+                            <div class="upload-text">点击或拖拽上传源数据文件</div>
+                            <div class="upload-hint">支持 .xlsx, .xls 格式</div>
+                            <input type="file" class="file-input" id="sourceFileInput" accept=".xlsx,.xls">
+                        </div>
+
+                        <div class="upload-area" id="targetFileArea">
+                            <div class="upload-icon">⊕</div>
+                            <div class="upload-text">点击或拖拽上传目标模板文件</div>
+                            <div class="upload-hint">支持 .xlsx, .xls 格式（可选）</div>
+                            <input type="file" class="file-input" id="targetFileInput" accept=".xlsx,.xls">
+                        </div>
+                    </div>
+
+                    <!-- Config Section -->
+                    <div class="config-section">
+                        <div class="config-header">
+                            <div class="config-title">映射规则配置</div>
+                            <div class="config-actions">
+                                <button class="btn btn-secondary" onclick="exportMappingRules()">导出规则</button>
+                                <button class="btn btn-secondary" onclick="importMappingRules()">导入规则</button>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary" onclick="showMappingRulesModal()">查看/编辑规则</button>
+                    </div>
+
+                    <!-- Process Button -->
+                    <button class="btn btn-primary" id="mappingProcessBtn" onclick="processMapping()" style="width: 100%; margin-top: 16px;" disabled>
+                        🚀 开始处理
+                    </button>
+
+                    <!-- Progress -->
+                    <div class="progress-container" id="mappingProgress">
+                        <div class="progress-label">
+                            <span>处理中...</span>
+                            <span id="mappingProgressText">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar" id="mappingProgressBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Results -->
+                    <div class="results" id="mappingResults">
+                        <div class="results-summary" id="mappingSummary">
+                            <!-- Results will be displayed here -->
+                        </div>
+                        <button class="btn btn-success" onclick="downloadMappingResult()">💾 下载结果文件</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Function 2: Merchant Split -->
+        <div id="splitFunction" class="hidden">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">商户拆分</div>
+                </div>
+                <div class="card-body">
+                    <!-- Upload Section -->
+                    <div id="splitUploadSection">
+                        <div class="upload-area" id="splitFileArea">
+                            <div class="upload-icon">⌬</div>
+                            <div class="upload-text">点击或拖拽上传标签映射结果文件</div>
+                            <div class="upload-hint">请先完成"标签映射分类"，然后上传映射后的文件</div>
+                            <input type="file" class="file-input" id="splitFileInput" accept=".xlsx,.xls">
+                        </div>
+                    </div>
+
+                    <!-- Config Section -->
+                    <div class="config-section">
+                        <div class="config-header">
+                            <div class="config-title">商户配置</div>
+                            <div class="config-actions">
+                                <button class="btn btn-secondary" onclick="exportMerchantConfig()">导出配置</button>
+                                <button class="btn btn-secondary" onclick="importMerchantConfig()">导入配置</button>
+                                <button class="btn btn-primary" onclick="showAddMerchantModal()">+ 添加商户</button>
+                            </div>
+                        </div>
+                        <div class="merchant-list" id="merchantList">
+                            <!-- Merchants will be displayed here -->
+                        </div>
+                    </div>
+
+                    <!-- Process Button -->
+                    <button class="btn btn-primary" id="splitProcessBtn" onclick="processSplit()" style="width: 100%; margin-top: 16px;" disabled>
+                        🚀 开始拆分
+                    </button>
+
+                    <!-- Progress -->
+                    <div class="progress-container" id="splitProgress">
+                        <div class="progress-label">
+                            <span>处理中...</span>
+                            <span id="splitProgressText">0%</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar" id="splitProgressBar" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Results -->
+                    <div class="results" id="splitResults">
+                        <div class="results-summary" id="splitSummary">
+                            <!-- Results will be displayed here -->
+                        </div>
+                        <button class="btn btn-success" onclick="downloadSplitResult()">📦 打包下载所有文件</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mapping Rules Modal -->
+    <div class="modal" id="mappingRulesModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">映射规则配置</div>
+                <div class="modal-close" onclick="closeModal('mappingRulesModal')">&times;</div>
+            </div>
+            <div class="modal-body">
+                <div id="mappingRulesContent">
+                    <!-- Rules will be displayed here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('mappingRulesModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveMappingRules()">保存规则</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Merchant Edit Modal -->
+    <div class="modal" id="merchantModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="merchantModalTitle">添加商户</div>
+                <div class="modal-close" onclick="closeModal('merchantModal')">&times;</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">商户名称</label>
+                    <input type="text" class="form-input" id="merchantNameInput" placeholder="请输入商户名称">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">所属门店</label>
+                    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <input type="text" class="form-input" id="storeInput" placeholder="输入门店名称" style="flex: 1;">
+                        <button class="btn btn-secondary" onclick="addStore()">添加</button>
+                    </div>
+                    <div class="store-list" id="storeList">
+                        <!-- Stores will be displayed here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('merchantModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveMerchant()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置数据 ====================
+
+        // 默认映射规则（从tag_mapper.py转换）
+        const DEFAULT_MAPPING_RULES = {
+            "性别": {
+                "男": "男",
+                "女": "女"
+            },
+            "年龄段": {
+                "25岁以内": "25岁以内",
+                "26-35岁": "26-35岁",
+                "36-45岁": "36-45岁",
+                "46-55岁": "46-55岁",
+                "55岁以上": "55岁以上"
+            },
+            "预算价格": {
+                "0-2W": "0-2W",
+                "2W-3W": "2W-3W",
+                "3W-6W": "3W-6W",
+                "6W-10W": "6W-10W",
+                "10W-15W": "10W-15W",
+                "15W以上": "15W以上"
+            },
+            "累计消费金额": {
+                "5000以内": "5000以内",
+                "5000以下": "5000以内",
+                "5000-10000": "5000-1万",
+                "6000-10000": "5000-1万",
+                "10000以上": "1万以上",
+                "5千-2万": "5千-2万",
+                "0-2万": "0-2万",
+                "2万-3万": "2万-3万",
+                "3万-6万": "3万-6万",
+                "6万-10万": "6万-10万",
+                "10万-15万": "10万-15万",
+                "15万以上": "15万以上",
+                "1000-3000": "1000-3000"
+            },
+            "购买需求": {
+                "新房装修": "新房装修",
+                "老房改造": "老房改造",
+                "家电换新": "家电换新",
+                "购置新品类": "购置新品类",
+                "替他人选购": "替他人选购",
+                "随便看看": "随便看看"
+            },
+            "意向品类": {
+                "中央空调": "中央空调",
+                "家用空调（柜挂机）": "家用空调（柜挂机）",
+                "家用空调": "家用空调",
+                "空调": "空调",
+                "冰箱": "冰箱",
+                "洗烘套": "洗烘套",
+                "洗衣机": "洗衣机",
+                "洗碗机": "洗碗机",
+                "烟灶": "烟灶",
+                "净饮水": "净饮水",
+                "热水": "热水",
+                "热水器": "热水",
+                "电热水器": "热水",
+                "全屋智能": "全屋智能",
+                "嵌入式": "嵌入式",
+                "壁挂炉": "壁挂炉",
+                "小家电": "小家电",
+                "新象套系": "新象套系"
+            },
+            "已购品类": {
+                "中央空调（已买）": "中央空调（已买）",
+                "家用空调（柜挂机）（已买）": "家用空调（柜挂机）（已买）",
+                "冰箱（已买）": "冰箱（已买）",
+                "洗烘套（已买）": "洗烘套（已买）",
+                "烟灶（已买）": "烟灶（已买）",
+                "净水（已买）": "净水（已买）",
+                "热水（已买）": "热水（已买）",
+                "嵌入式（已买）": "嵌入式（已买）",
+                "小家电（已买）": "小家电（已买）",
+                "全屋智能（已买）": "全屋智能（已买）",
+                "新象套系（已买）": "新象套系（已买）",
+                "已购-电风扇": "小家电（已买）",
+                "已购-电饭煲": "小家电（已买）"
+            },
+            "客户类型": {
+                "潜在客户": "潜在客户",
+                "已成交": "已成交",
+                "消费者": "消费者",
+                "内部人员": "内部人员",
+                "异业伙伴": "异业伙伴",
+                "潜在大客户（套购）": "潜在大客户（套购）",
+                "设计师": "设计师",
+                "小区物业人员": "小区物业人员"
+            },
+            "所处阶段": {
+                "潜在客户": "潜在客户",
+                "已成交": "已成交",
+                "复购": "复购",
+                "多次到访": "已付定金",
+                "二次到访": "已付定金",
+                "已进种草群": "已付定金",
+                "已付定金": "已付定金",
+                "关单（无跟进价值）": "关单（无跟进价值）"
+            },
+            "来源渠道": {
+                "自然进店": "自然进店",
+                "老用户推荐": "老用户推荐",
+                "老用户复购": "老用户复购",
+                "设计师推荐": "设计师推荐",
+                "异业推荐": "异业推荐",
+                "线上": "其他",
+                "线上咨询": "其他",
+                "线下": "圈层活动",
+                "线下活动": "圈层活动",
+                "线下门店": "其他",
+                "抖音引流": "抖音引流",
+                "首次到店": "自然进店",
+                "二次到访": "自然进店",
+                "多次到访": "自然进店",
+                "小区推广": "小区推广",
+                "小红书引流": "小红书引流",
+                "圈层活动": "圈层活动"
+            },
+            "职业": {
+                "家庭主妇": "家庭主妇",
+                "创业者": "创业者",
+                "自由职业者": "自由职业者",
+                "内部人员": "内部人员",
+                "异业伙伴": "异业伙伴",
+                "小区物业人员": "其他职业",
+                "白领": "白领",
+                "其他": "其他职业",
+                "设计师": "白领",
+                "体制内": "体制内",
+                "自媒体博主": "自媒体博主"
+            },
+            "房产类型": {
+                "商品房": "商品房",
+                "别墅（独栋）": "别墅（独栋）",
+                "自建房": "自建房",
+                "大平层": "大平层",
+                "洋房": "洋房",
+                "别墅（叠拼/联排）": "别墅（叠拼/联排）",
+                "其他": "其他房产类型"
+            },
+            "房屋面积": {
+                "100-150平": "100-150平",
+                "150-200平": "150-200平",
+                "200-300平": "200-300平",
+                "300平以上": "300平以上",
+                "100平以内": "100平以内",
+                "100-150㎡": "100-150平"
+            },
+            "家庭情况": {
+                "两口之家": "两口之家",
+                "三代同堂": "三代同堂",
+                "多口之家": "多口之家",
+                "单身": "单身",
+                "单身/未婚": "单身",
+                "已婚有孩": "多口之家",
+                "二人世界": "两口之家",
+                "宝妈": "多口之家"
+            },
+            "到访情况": {
+                "首次到店": "首次到店",
+                "二次到访": "二次到访",
+                "多次到访": "多次到访"
+            },
+            "是否COLMO会员": {
+                "是": "是",
+                "否": "否"
+            },
+            "老带新用户数": {
+                "1人": "1人",
+                "2-5人": "2-5人",
+                "6-10人": "6-10人",
+                "10人+": "10人+"
+            },
+            "老带新成交数": {
+                "1单": "1单",
+                "2-5单": "2-5单",
+                "6-10单": "6-10单",
+                "10单+": "10单+"
+            },
+            "线下活动": {
+                "城市首发": "城市首发",
+                "圈层活动": "圈层活动",
+                "老用户活动": "老用户活动",
+                "设计师圈层活动": "设计师圈层活动",
+                "小区外拓活动": "小区外拓活动",
+                "样板间进驻": "样板间进驻",
+                "家博会": "家博会",
+                "装企主推": "装企主推"
+            }
+        };
+
+        // 白名单
+        const FIELD_WHITELIST = {
+            "性别": ["男", "女"],
+            "客户类型": ["小区物业人员", "异业伙伴", "设计师", "消费者", "内部人员"],
+            "所处阶段": ["复购", "已成交", "已付定金", "潜在大客户（套购）", "潜在客户", "关单（无跟进价值）"],
+            "购买需求": ["购置新品类", "新房装修", "老房改造", "家电换新", "替他人选购", "随便看看"],
+            "年龄段": ["25岁以内", "26-35岁", "36-45岁", "46-55岁", "55岁以上"],
+            "职业": ["家庭主妇", "体制内", "创业者", "其他职业", "自由职业者", "自媒体博主", "白领"],
+            "房产类型": ["其他房产类型", "自建房", "商品房", "大平层", "洋房", "别墅（独栋）", "别墅（叠拼/联排）"],
+            "房屋面积": ["100平以内", "100-150平", "150-200平", "200-300平", "300平以上"],
+            "家庭情况": ["三代同堂", "多口之家", "两口之家", "单身"],
+            "到访情况": ["首次到店", "二次到访", "多次到访", "未到店"],
+            "来源渠道": ["自然进店", "设计师推荐", "异业推荐", "老用户推荐", "老用户复购", "圈层活动", "小红书引流", "抖音引流", "美团高德", "小区推广", "其他"],
+            "预算价格": ["0-2W", "2W-3W", "3W-6W", "6W-10W", "10W-15W", "15W以上"],
+            "累计消费金额": ["5000以内", "5000-1万", "1万以上", "5千-2万", "0-2万", "2万-3万", "3万-6万", "6万-10万", "10万-15万", "15万以上", "1000-3000"],
+            "意向品类": ["壁挂炉", "家用空调（柜挂机）", "中央空调", "冰箱", "洗烘套", "烟灶", "洗碗机", "净饮水", "热水", "嵌入式", "小家电", "全屋智能", "新象套系"],
+            "已购品类": ["家用空调（柜挂机）（已买）", "中央空调（已买）", "冰箱（已买）", "洗烘套（已买）", "烟灶（已买）", "净水（已买）", "热水（已买）", "嵌入式（已买）", "小家电（已买）", "全屋智能（已买）", "新象套系（已买）"],
+            "是否COLMO会员": ["是", "否"],
+            "老带新成交数": ["1单", "2-5单", "6-10单", "10单+"],
+            "老带新用户数": ["1人", "2-5人", "6-10人", "10人+"],
+            "线下活动": ["城市首发", "圈层活动", "老用户活动", "设计师圈层活动", "小区外拓活动", "样板间进驻", "家博会", "装企主推"]
+        };
+
+        // 默认商户配置
+        const DEFAULT_MERCHANTS = [
+            {
+                name: "郑州亨泽",
+                stores: [
+                    "欧凯龙家居郑州郑东新区商场COLMO智感体验馆",
+                    "花园路大明宫COLMO智感体验馆",
+                    "居然之家郑州中陆商场COLMO智感体验馆",
+                    "郑州郑州航空港经济综合实验区渴慕COLMO智感体验馆",
+                    "居然之家郑州商都路商场COLMO智感体验馆",
+                    "上街区欧凯龙COLMO智感体验馆",
+                    "商都路红星COLMO城市体验中心",
+                    "巩义万洋商贸城COLMO智感体验馆",
+                    "登封国际商贸城COLMO智感体验馆",
+                    "北龙湖居然COLMO城市体验中心",
+                    "三门峡义乌国际商贸城COLMO智感体验馆",
+                    "郑州金水区凤凰城COLMO智感体验馆",
+                    "高新万达COLMO智感体验馆（Mall）",
+                    "郑州中牟县科泽COLMO智感体验馆",
+                    "欧凯龙家居郑州嵩山路商场COLMO智感体验馆",
+                    "欧凯龙家居郑州中原路商场COLMO智感体验馆",
+                    "花园路丹尼斯COLMO智感体验馆",
+                    "郑州郑州高新技术产业开发区瑞达路COLMO智感体验馆",
+                    "高新万达COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "长沙麓明",
+                stores: [
+                    "长沙圭塘街道湖南华怡COLMO智感体验馆",
+                    "岳麓区广大环球COLMO智感体验馆",
+                    "长沙方圆荟超级COLMO智感体验馆",
+                    "雨花区欧亚达COLMO智感体验馆",
+                    "长沙望城吾悦COLMO智感体验馆（Mall）",
+                    "望城区湾田国际COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "山东美森",
+                stores: [
+                    "金乡红星美凯龙COLMO智感体验馆",
+                    "邹城新都汇COLMO体验馆",
+                    "济宁万象汇COLMO体验馆",
+                    "山东美森舒适家COLMO智感体验馆",
+                    "嘉祥COLMO智感体验馆",
+                    "鱼台县COLMO智感体验馆",
+                    "邹城红星美凯龙COLMO智感体验馆",
+                    "济宁金宇COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "天津阿美乐",
+                stores: [
+                    "唐山居然之家君瑞COLMO智感体验馆",
+                    "秦皇岛昌黎县阿美乐COLMO智感体验馆",
+                    "红星美凯龙唐山时代家居COLMO智感体验馆",
+                    "秦皇岛海港区帅泰悠享美学大家居COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "山东艾德源",
+                stores: [
+                    "红星美凯龙济南北园大街商场COLMO智感体验馆",
+                    "济南天桥银座中心店COLMO智感体验馆",
+                    "济南市旅游路红星美凯龙COLMO智感体验馆",
+                    "黄台环球家居COLMO城市体验中心",
+                    "北宸龙湖COLMO智感体验馆（Mall）",
+                    "济南西城龙湖COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "南昌理享",
+                stores: [
+                    "南昌京东镇江西广电COLMO智感体验馆",
+                    "南昌城东香江COLMO智感体验馆",
+                    "南昌华皓COLMO智感体验馆",
+                    "南昌万象城COLMO智感体验馆（Mall）",
+                    "南昌青云谱区广州路COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "温州中航",
+                stores: [
+                    "龙港新鸿未来城COLMO智感体验馆（Mall）",
+                    "瓯海第六空间COLMO智感体验馆",
+                    "瑞安吾悦广场COLMO智感体验馆（Mall）",
+                    "温州联结福建材COLMO智感体验馆",
+                    "温州龙湾吾悦COLMO体验店",
+                    "温州瓯海COLMO智感体验馆",
+                    "温州平阳鸿印里COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "常州纵贯线",
+                stores: [
+                    "常州新北月星家居COLMO智感体验馆（Mall）",
+                    "常州飞龙红星美凯龙COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "江苏傲松",
+                stores: [
+                    "红星美凯龙苏州园区1号店COLMO智感体验馆",
+                    "吴江居然之家COLMO智感体验馆",
+                    "桐泾北路月星家居COLMO智感体验馆",
+                    "红星美凯龙苏州蠡口商场COLMO智感体验馆",
+                    "红星美凯龙苏州吴中东方商场COLMO智感体验馆",
+                    "龙湖狮山天街COLMO智感体验馆"
+                ]
+            },
+            {
+                name: "苏州融鼎",
+                stores: [
+                    "苏州新区永旺COLMO智感体验馆（Mall）"
+                ]
+            },
+            {
+                name: "杭州科慕",
+                stores: [
+                    "杭州新时代COLMO家中智慧空气馆",
+                    "红星美凯龙杭州至尊MALL商场COLMO智感体验馆",
+                    "杭州中博装饰COLMO装企店"
+                ]
+            },
+            {
+                name: "浙江世玛易家",
+                stores: [
+                    "杭州江南家居COLMO智感体验馆",
+                    "杭州西投银泰COLMO智感体验馆（Mall）"
+                ]
+            },
+            {
+                name: "杭州君科",
+                stores: [
+                    "杭州恒大国际建材COLMO智感体验馆",
+                    "杭州圣都装饰COLMO智感体验馆",
+                    "杭州铭品COLMO家中专业店",
+                    "杭州滨江六空8090COLMO城市体验中心"
+                ]
+            }
+        ];
+
+        // ==================== 全局变量 ====================
+
+        let mappingRules = JSON.parse(JSON.stringify(DEFAULT_MAPPING_RULES));
+        let merchants = JSON.parse(JSON.stringify(DEFAULT_MERCHANTS));
+        let sourceFileData = null;
+        let targetFileData = null;
+        let splitFileData = null;
+        let mappingResultData = null;
+        let splitResultData = null;
+        let currentEditingMerchantIndex = -1;
+        let tempStoreList = [];
+
+        // ==================== 初始化 ====================
+
+        document.addEventListener('DOMContentLoaded', function() {
+            initFunctionSelector();
+            initUploadAreas();
+            initMerchantList();
+            loadSavedConfig();
+        });
+
+        function initFunctionSelector() {
+            const select = document.getElementById('functionSelect');
+            select.addEventListener('change', function() {
+                const value = this.value;
+                document.getElementById('mappingFunction').classList.toggle('hidden', value !== 'mapping');
+                document.getElementById('splitFunction').classList.toggle('hidden', value !== 'split');
+            });
+        }
+
+        function initUploadAreas() {
+            // Mapping function upload areas
+            setupUploadArea('sourceFileArea', 'sourceFileInput', function(file) {
+                sourceFileData = file;
+                displayFileInfo('sourceFileArea', file);
+                checkMappingReady();
+            });
+
+            setupUploadArea('targetFileArea', 'targetFileInput', function(file) {
+                targetFileData = file;
+                displayFileInfo('targetFileArea', file);
+            });
+
+            // Split function upload area
+            setupUploadArea('splitFileArea', 'splitFileInput', function(file) {
+                splitFileData = file;
+                displayFileInfo('splitFileArea', file);
+                checkSplitReady();
+            });
+        }
+
+        function setupUploadArea(areaId, inputId, callback) {
+            const area = document.getElementById(areaId);
+            const input = document.getElementById(inputId);
+
+            area.addEventListener('click', () => input.click());
+
+            area.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                area.classList.add('dragover');
+            });
+
+            area.addEventListener('dragleave', () => {
+                area.classList.remove('dragover');
+            });
+
+            area.addEventListener('drop', (e) => {
+                e.preventDefault();
+                area.classList.remove('dragover');
+                const file = e.dataTransfer.files[0];
+                if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+                    callback(file);
+                } else {
+                    alert('请上传 Excel 文件 (.xlsx 或 .xls)');
+                }
+            });
+
+            input.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    callback(file);
+                }
+            });
+        }
+
+        function displayFileInfo(areaId, file) {
+            const area = document.getElementById(areaId);
+            area.innerHTML = `
+                <div class="file-item">
+                    <div class="file-icon">📄</div>
+                    <div class="file-info">
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-size">${formatFileSize(file.size)}</div>
+                    </div>
+                    <div class="file-remove" onclick="removeFile('${areaId}', '${areaId.replace('Area', 'Input')}')">&times;</div>
+                </div>
+            `;
+        }
+
+        function removeFile(areaId, inputId) {
+            document.getElementById(areaId).innerHTML = `
+                <div class="upload-icon">📄</div>
+                <div class="upload-text">点击或拖拽上传文件</div>
+                <div class="upload-hint">支持 .xlsx, .xls 格式</div>
+            `;
+
+            if (areaId === 'sourceFileArea') {
+                sourceFileData = null;
+            } else if (areaId === 'targetFileArea') {
+                targetFileData = null;
+            } else if (areaId === 'splitFileArea') {
+                splitFileData = null;
+            }
+
+            checkMappingReady();
+            checkSplitReady();
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function checkMappingReady() {
+            const btn = document.getElementById('mappingProcessBtn');
+            btn.disabled = !sourceFileData;
+        }
+
+        function checkSplitReady() {
+            const btn = document.getElementById('splitProcessBtn');
+            btn.disabled = !splitFileData;
+        }
+
+        // ==================== 标签映射引擎 ====================
+
+        function parseTags(tagsStr) {
+            if (!tagsStr) return {};
+
+            const tags = tagsStr.split(',').map(t => t.trim()).filter(t => t);
+            const result = {};
+
+            // 多值字段
+            const interestCategories = [];
+            const purchasedCategories = [];
+            const demands = [];
+
+            for (const tag of tags) {
+                let matched = false;
+
+                for (const [fieldName, fieldMap] of Object.entries(mappingRules)) {
+                    if (tag in fieldMap) {
+                        const targetValue = fieldMap[tag];
+
+                        if (fieldName === '意向品类') {
+                            interestCategories.push(targetValue);
+                        } else if (fieldName === '已购品类') {
+                            purchasedCategories.push(targetValue);
+                        } else if (fieldName === '购买需求') {
+                            demands.push(targetValue);
+                        } else {
+                            result[fieldName] = targetValue;
+                        }
+
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            // 处理多值字段
+            if (interestCategories.length > 0) {
+                result['意向品类'] = interestCategories.join(',');
+            }
+            if (purchasedCategories.length > 0) {
+                result['已购品类'] = purchasedCategories.join(',');
+            }
+            if (demands.length > 0) {
+                result['购买需求'] = demands.join(',');
+            }
+
+            // 白名单验证
+            const filteredResult = {};
+            for (const [fieldName, fieldValue] of Object.entries(result)) {
+                if (FIELD_WHITELIST[fieldName]) {
+                    const whitelist = FIELD_WHITELIST[fieldName];
+
+                    if (['意向品类', '已购品类', '购买需求'].includes(fieldName)) {
+                        const values = fieldValue.split(',').map(v => v.trim());
+                        const validValues = values.filter(v => whitelist.includes(v));
+                        if (validValues.length > 0) {
+                            filteredResult[fieldName] = validValues.join(',');
+                        }
+                    } else {
+                        if (whitelist.includes(fieldValue)) {
+                            filteredResult[fieldName] = fieldValue;
+                        }
+                    }
+                } else {
+                    filteredResult[fieldName] = fieldValue;
+                }
+            }
+
+            return filteredResult;
+        }
+
+        async function processMapping() {
+            if (!sourceFileData) return;
+
+            showProgress('mapping');
+            const progress = { current: 0, total: 0 };
+
+            try {
+                // 读取源文件
+                updateProgress('mapping', 10, '读取源文件...');
+                const sourceWorkbook = await readExcelFile(sourceFileData);
+                const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
+                const sourceData = XLSX.utils.sheet_to_json(sourceSheet, { header: 1 });
+
+                progress.total = sourceData.length;
+
+                // 处理数据
+                const mappedData = [];
+                const headers = [
+                    '客户名称', '客户', '添加人', '添加时间', '来源', '添加人所属部门',
+                    '性别', '客户类型', '来源渠道', '所处阶段', '购买需求', '意向品类', '已购品类',
+                    '累计消费金额', '年龄段', '职业', '房产类型', '房屋面积', '家庭情况',
+                    '到访情况', '预算价格', '是否COLMO会员', '老带新用户数', '老带新成交数',
+                    '线下活动', '所在小区', '推荐人身份-姓名', '关注竞品', '其他已定家装/家居品牌', '关单原因'
+                ];
+
+                for (let i = 0; i < sourceData.length; i++) {
+                    const row = sourceData[i];
+                    const tagsStr = row[10]; // K列：企微标签
+
+                    // 解析标签
+                    const tagFields = parseTags(tagsStr);
+
+                    // 构建输出行
+                    const outputRow = {
+                        '客户名称': row[0] || '',
+                        '客户': row[0] || '',
+                        '添加人': row[4] || '',
+                        '添加时间': row[7] || '',
+                        '来源': row[8] || '',
+                        '添加人所属部门': row[6] || ''
+                    };
+
+                    Object.assign(outputRow, tagFields);
+
+                    mappedData.push(outputRow);
+
+                    progress.current = i + 1;
+                    const percent = Math.floor((progress.current / progress.total) * 80) + 10;
+                    updateProgress('mapping', percent, `处理中: ${progress.current}/${progress.total}`);
+
+                    // 每100条更新一次，避免阻塞UI
+                    if (i % 100 === 0) {
+                        await sleep(1);
+                    }
+                }
+
+                mappingResultData = { headers, data: mappedData };
+
+                // 显示结果
+                showMappingResults(mappedData);
+                updateProgress('mapping', 100, '✅ 处理完成!');
+
+                setTimeout(() => {
+                    hideProgress('mapping');
+                }, 1000);
+
+            } catch (error) {
+                console.error('处理失败:', error);
+                alert('处理失败: ' + error.message);
+                hideProgress('mapping');
+            }
+        }
+
+        function showMappingResults(data) {
+            const container = document.getElementById('mappingResults');
+            const summary = document.getElementById('mappingSummary');
+
+            // 统计各字段的数据量
+            const fieldStats = {};
+            for (const row of data) {
+                for (const [key, value] of Object.entries(row)) {
+                    if (value) {
+                        if (!fieldStats[key]) fieldStats[key] = 0;
+                        fieldStats[key]++;
+                    }
+                }
+            }
+
+            // 构建结果HTML
+            let html = '<div class="result-item"><span class="result-label">总数据量:</span><span class="result-value">' + data.length + ' 条</span></div>';
+
+            for (const [field, count] of Object.entries(fieldStats)) {
+                html += '<div class="result-item"><span class="result-label">' + field + ':</span><span class="result-value">' + count + ' 条</span></div>';
+            }
+
+            summary.innerHTML = html;
+            container.style.display = 'block';
+        }
+
+        function downloadMappingResult() {
+            if (!mappingResultData) return;
+
+            const { headers, data } = mappingResultData;
+            const ws = XLSX.utils.json_to_sheet(data, { header: headers });
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '处理结果');
+
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+            XLSX.writeFile(wb, `标签映射结果_${timestamp}.xlsx`);
+        }
+
+        // ==================== 商户拆分引擎 ====================
+
+        function determineMerchant(department) {
+            if (!department) return null;
+
+            for (const merchant of merchants) {
+                for (const store of merchant.stores) {
+                    if (department.includes(store)) {
+                        return merchant.name;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        async function processSplit() {
+            if (!splitFileData) return;
+
+            showProgress('split');
+            const progress = { current: 0, total: 0 };
+
+            try {
+                // 读取源文件
+                updateProgress('split', 10, '读取源文件...');
+                const sourceWorkbook = await readExcelFile(splitFileData);
+                const sourceSheet = sourceWorkbook.Sheets[sourceWorkbook.SheetNames[0]];
+                const sourceData = XLSX.utils.sheet_to_json(sourceSheet, { header: 1 });
+
+                // 自动查找「添加人所属部门」列的索引
+                updateProgress('split', 15, '识别列结构...');
+                let departmentColumnIndex = -1;
+                const headerRow = sourceData[0];
+
+                console.log('📋 文件中的所有列名:', headerRow.map((h, i) => `${i+1}. "${h}"`).join(', '));
+
+                // 尝试多种可能的列名
+                const possibleNames = ['添加人所属部门', '所属部门', '部门', '添加人部门'];
+
+                // 首先尝试精确匹配
+                for (const name of possibleNames) {
+                    const index = headerRow.indexOf(name);
+                    if (index !== -1) {
+                        departmentColumnIndex = index;
+                        console.log(`✅ 精确匹配找到列: "${name}" 在第 ${index + 1} 列`);
+                        break;
+                    }
+                }
+
+                // 如果精确匹配失败，尝试模糊匹配（包含关键词）
+                if (departmentColumnIndex === -1) {
+                    console.log('⚠️ 精确匹配失败，尝试模糊匹配...');
+                    for (let i = 0; i < headerRow.length; i++) {
+                        const headerName = String(headerRow[i] || '').trim();
+                        // 检查是否包含"部门"关键词
+                        if (headerName.includes('部门')) {
+                            departmentColumnIndex = i;
+                            console.log(`✅ 模糊匹配找到列: "${headerName}" 在第 ${i + 1} 列`);
+                            break;
+                        }
+                    }
+                }
+
+                if (departmentColumnIndex === -1) {
+                    const availableColumns = headerRow.map((h, i) => `${i+1}. ${h}`).join('\n');
+                    throw new Error('未找到「添加人所属部门」列\n\n文件中的列名:\n' + availableColumns + '\n\n请确保文件包含部门相关列');
+                }
+
+                progress.total = sourceData.length - 1; // 减去表头行
+
+                // 按商户分类
+                const merchantData = {};
+                const unmatchedData = [];
+
+                for (const merchant of merchants) {
+                    merchantData[merchant.name] = [];
+                }
+
+                // 从第二行开始处理数据（跳过表头）
+                for (let i = 1; i < sourceData.length; i++) {
+                    const row = sourceData[i];
+                    const department = row[departmentColumnIndex]; // 使用找到的列索引
+
+                    const merchant = determineMerchant(department);
+
+                    if (merchant) {
+                        merchantData[merchant].push(row);
+                    } else {
+                        unmatchedData.push(row);
+                    }
+
+                    progress.current = i;
+                    const percent = Math.floor((progress.current / progress.total) * 80) + 15;
+                    updateProgress('split', percent, `处理中: ${progress.current}/${progress.total}`);
+
+                    if (i % 100 === 0) {
+                        await sleep(1);
+                    }
+                }
+
+                // 添加表头到所有数据
+                for (const merchantName in merchantData) {
+                    if (merchantData[merchantName].length > 0) {
+                        merchantData[merchantName].unshift(headerRow);
+                    }
+                }
+                if (unmatchedData.length > 0) {
+                    unmatchedData.unshift(headerRow);
+                }
+
+                splitResultData = { merchantData, unmatchedData };
+
+                // 显示结果
+                showSplitResults(merchantData, unmatchedData);
+                updateProgress('split', 100, '✅ 处理完成!');
+
+                setTimeout(() => {
+                    hideProgress('split');
+                }, 1000);
+
+            } catch (error) {
+                console.error('拆分失败:', error);
+                alert('拆分失败: ' + error.message);
+                hideProgress('split');
+            }
+        }
+
+        function showSplitResults(merchantData, unmatchedData) {
+            const container = document.getElementById('splitResults');
+            const summary = document.getElementById('splitSummary');
+
+            let html = '';
+
+            for (const [merchantName, data] of Object.entries(merchantData)) {
+                const count = data.length;
+                const hasData = count > 0;
+                html += `<div class="result-item" style="color: ${hasData ? 'inherit' : '#999'}">`;
+                html += `<span class="result-label">${merchantName}:</span>`;
+                html += `<span class="result-value">${count} 条</span>`;
+                // 添加单独下载按钮
+                if (hasData) {
+                    html += `<button class="btn-download-single" onclick="downloadSingleMerchant('${merchantName}')" style="margin-left: 10px; padding: 4px 12px; font-size: 13px;">📥 下载</button>`;
+                }
+                html += '</div>';
+            }
+
+            if (unmatchedData.length > 0) {
+                html += '<div class="result-item" style="color: #FAAD14;">';
+                html += '<span class="result-label">⚠️ 未分配:</span>';
+                html += '<span class="result-value">' + unmatchedData.length + ' 条</span>';
+                // 未分配数据也可以下载
+                html += `<button class="btn-download-single" onclick="downloadUnassigned()" style="margin-left: 10px; padding: 4px 12px; font-size: 13px;">📥 下载</button>`;
+                html += '</div>';
+            }
+
+            html += '<div class="result-item">';
+            html += '<span class="result-label">总计:</span>';
+            html += '<span class="result-value">' + (Object.keys(merchantData).length) + ' 个商户</span>';
+            html += '</div>';
+
+            summary.innerHTML = html;
+            summary.className = 'results-summary';
+            if (unmatchedData.length > 0) {
+                summary.className = 'results-summary warning';
+            }
+
+            container.style.display = 'block';
+        }
+
+        // 单独下载某个商户的文件
+        async function downloadSingleMerchant(merchantName) {
+            if (!splitResultData) {
+                alert('没有可下载的数据');
+                return;
+            }
+
+            try {
+                const { merchantData } = splitResultData;
+                const data = merchantData[merchantName];
+
+                if (!data || data.length === 0) {
+                    alert(`${merchantName} 没有数据`);
+                    return;
+                }
+
+                // 使用 aoa_to_sheet 处理数组格式数据
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, merchantName);
+
+                // 下载单个文件
+                XLSX.writeFile(wb, `${merchantName}.xlsx`);
+                console.log(`✅ 已下载: ${merchantName}.xlsx`);
+            } catch (error) {
+                console.error('下载失败:', error);
+                alert('下载失败: ' + error.message);
+            }
+        }
+
+        // 下载未分配数据
+        async function downloadUnassigned() {
+            if (!splitResultData) {
+                alert('没有可下载的数据');
+                return;
+            }
+
+            try {
+                const { unmatchedData } = splitResultData;
+
+                if (!unmatchedData || unmatchedData.length === 0) {
+                    alert('没有未分配数据');
+                    return;
+                }
+
+                const ws = XLSX.utils.aoa_to_sheet(unmatchedData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, '未分配');
+
+                XLSX.writeFile(wb, `未分配.xlsx`);
+                console.log('✅ 已下载: 未分配.xlsx');
+            } catch (error) {
+                console.error('下载失败:', error);
+                alert('下载失败: ' + error.message);
+            }
+        }
+
+        async function downloadSplitResult() {
+            console.log('=== downloadSplitResult 被调用 ===');
+            console.log('splitResultData 存在:', !!splitResultData);
+
+            if (!splitResultData) {
+                alert('没有可下载的数据，请先进行商户拆分');
+                return;
+            }
+
+            // 检查必需的库（CSV 方案不需要 XLSX.utils）
+            console.log('=== 检查库文件 ===');
+            console.log('JSZip:', typeof JSZip);
+            console.log('window.JSZip:', typeof window.JSZip);
+            console.log('saveAs:', typeof saveAs);
+
+            const JSZipConstructor = window.JSZip || JSZip;
+            if (!JSZipConstructor) {
+                alert('❌ JSZip 库未加载！\n\n请刷新页面重试。');
+                return;
+            }
+
+            if (typeof saveAs === 'undefined') {
+                alert('❌ 下载库（FileSaver）未加载！\n\n请刷新页面重试。');
+                return;
+            }
+
+            console.log('✅ 准备打包，使用 CSV 格式（Excel 可直接打开）');
+            console.log('merchantData:', Object.keys(splitResultData.merchantData));
+
+            // CSV 生成函数
+            function createCSV(data) {
+                const BOM = '\uFEFF'; // BOM 用于支持中文
+                const csvContent = data.map(row =>
+                    row.map(cell => {
+                        // 处理每个单元格
+                        const cellValue = String(cell ?? ''); // 使用 ?? 处理 null/undefined
+                        // 如果包含逗号、引号或换行，需要用引号包裹并转义
+                        if (cellValue.includes(',') || cellValue.includes('"') || cellValue.includes('\n')) {
+                            return `"${cellValue.replace(/"/g, '""')}"`;
+                        }
+                        return cellValue;
+                    }).join(',')
+                ).join('\n');
+                return new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+            }
+
+            try {
+                const { merchantData, unmatchedData } = splitResultData;
+                const zip = new JSZipConstructor();
+
+                console.log('开始添加 CSV 文件到 ZIP...');
+
+                // 为每个商户创建 CSV 文件
+                let fileCount = 0;
+                for (const [merchantName, data] of Object.entries(merchantData)) {
+                    if (data.length > 0) {
+                        console.log(`添加 ${merchantName}: ${data.length} 行数据`);
+
+                        try {
+                            const csvBlob = createCSV(data);
+                            zip.file(`${merchantName}.csv`, csvBlob);
+                            fileCount++;
+                            console.log(`✅ ${merchantName} CSV 添加成功`);
+                        } catch (err) {
+                            console.error(`❌ ${merchantName} CSV 添加失败:`, err);
+                            throw new Error(`生成 ${merchantName} CSV 失败: ${err.message}`);
+                        }
+                    }
+                }
+
+                // 未分配数据
+                if (unmatchedData.length > 0) {
+                    console.log(`添加 未分配: ${unmatchedData.length} 行数据`);
+                    try {
+                        const csvBlob = createCSV(unmatchedData);
+                        zip.file(`未分配.csv`, csvBlob);
+                        fileCount++;
+                        console.log(`✅ 未分配 CSV 添加成功`);
+                    } catch (err) {
+                        console.error(`❌ 未分配 CSV 添加失败:`, err);
+                    }
+                }
+
+                console.log(`总共添加了 ${fileCount} 个 CSV 文件到 ZIP`);
+
+                // 检查是否有文件
+                if (zip.files.length === 0) {
+                    alert('没有可下载的文件');
+                    return;
+                }
+
+                console.log('开始生成 ZIP blob...');
+
+                // 显示加载提示
+                const loadingMsg = document.createElement('div');
+                loadingMsg.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 20px 40px; border-radius: 8px; z-index: 9999; font-family: sans-serif;';
+                loadingMsg.textContent = '正在打包文件...';
+                document.body.appendChild(loadingMsg);
+
+                // 生成并下载ZIP
+                const zipBlob = await zip.generateAsync({ type: 'blob' });
+                console.log('ZIP blob 生成完成，大小:', zipBlob.size);
+
+                const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+                const fileName = `商户拆分结果_${timestamp}.zip`;
+                console.log('开始下载:', fileName);
+
+                saveAs(zipBlob, fileName);
+
+                // 移除加载提示
+                document.body.removeChild(loadingMsg);
+
+                console.log('✅ 下载成功');
+                alert(`✅ 打包完成！\n\n已下载 ${zip.files.length} 个 CSV 文件\n\n注意：CSV 文件可以用 Excel 直接打开`);
+            } catch (error) {
+                console.error('❌ 下载失败:', error);
+                console.error('错误堆栈:', error.stack);
+
+                // 显示详细的错误信息
+                let errorMsg = '下载失败: ' + error.message;
+                if (error.message.includes('XLSX')) {
+                    errorMsg += '\n\nExcel 处理库出现问题，请刷新页面重试。';
+                } else if (error.message.includes('JSZip')) {
+                    errorMsg += '\n\nZIP 打包库出现问题，请刷新页面重试。';
+                } else if (error.message.includes('saveAs')) {
+                    errorMsg += '\n\n文件保存库出现问题，请刷新页面重试。';
+                }
+                errorMsg += '\n\n请查看控制台获取详细错误信息（按 Command+Option+J）';
+
+                alert(errorMsg);
+            }
+        }
+
+        // ==================== Excel 处理 ====================
+
+        function readExcelFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        resolve(workbook);
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                reader.onerror = () => reject(new Error('文件读取失败'));
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // ==================== 商户管理 ====================
+
+        function initMerchantList() {
+            renderMerchantList();
+        }
+
+        function renderMerchantList() {
+            const container = document.getElementById('merchantList');
+
+            if (merchants.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #999; padding: 20px;">暂无商户配置</div>';
+                return;
+            }
+
+            container.innerHTML = merchants.map((merchant, index) => `
+                <div class="merchant-item">
+                    <div class="merchant-name">📍 ${merchant.name} (${merchant.stores.length}个门店)</div>
+                    <div class="merchant-stores">${merchant.stores.slice(0, 3).join('、')}${merchant.stores.length > 3 ? '...' : ''}</div>
+                    <div class="merchant-actions">
+                        <button class="btn btn-secondary" onclick="editMerchant(${index})" style="padding: 6px 12px; font-size: 13px;">编辑</button>
+                        <button class="btn btn-secondary" onclick="deleteMerchant(${index})" style="padding: 6px 12px; font-size: 13px; color: #F5222D; border-color: #F5222D;">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showAddMerchantModal() {
+            currentEditingMerchantIndex = -1;
+            tempStoreList = [];
+            document.getElementById('merchantModalTitle').textContent = '添加商户';
+            document.getElementById('merchantNameInput').value = '';
+            document.getElementById('storeInput').value = '';
+            renderStoreList();
+            document.getElementById('merchantModal').classList.add('show');
+        }
+
+        function editMerchant(index) {
+            currentEditingMerchantIndex = index;
+            tempStoreList = [...merchants[index].stores];
+            document.getElementById('merchantModalTitle').textContent = '编辑商户';
+            document.getElementById('merchantNameInput').value = merchants[index].name;
+            document.getElementById('storeInput').value = '';
+            renderStoreList();
+            document.getElementById('merchantModal').classList.add('show');
+        }
+
+        function deleteMerchant(index) {
+            if (confirm('确定要删除这个商户吗？')) {
+                merchants.splice(index, 1);
+                renderMerchantList();
+                saveMerchantConfig();
+            }
+        }
+
+        function addStore() {
+            const input = document.getElementById('storeInput');
+            const storeName = input.value.trim();
+
+            if (storeName) {
+                if (tempStoreList.includes(storeName)) {
+                    alert('该门店已存在');
+                    return;
+                }
+                tempStoreList.push(storeName);
+                input.value = '';
+                renderStoreList();
+            }
+        }
+
+        function removeStore(index) {
+            tempStoreList.splice(index, 1);
+            renderStoreList();
+        }
+
+        function renderStoreList() {
+            const container = document.getElementById('storeList');
+
+            if (tempStoreList.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #999; padding: 16px;">暂无门店</div>';
+                return;
+            }
+
+            container.innerHTML = tempStoreList.map((store, index) => `
+                <div class="store-item">
+                    <span>${store}</span>
+                    <span style="color: #F5222D; cursor: pointer; font-size: 18px;" onclick="removeStore(${index})">&times;</span>
+                </div>
+            `).join('');
+        }
+
+        function saveMerchant() {
+            const name = document.getElementById('merchantNameInput').value.trim();
+
+            if (!name) {
+                alert('请输入商户名称');
+                return;
+            }
+
+            if (tempStoreList.length === 0) {
+                alert('请至少添加一个门店');
+                return;
+            }
+
+            const merchantData = { name, stores: [...tempStoreList] };
+
+            if (currentEditingMerchantIndex >= 0) {
+                merchants[currentEditingMerchantIndex] = merchantData;
+            } else {
+                merchants.push(merchantData);
+            }
+
+            renderMerchantList();
+            saveMerchantConfig();
+            closeModal('merchantModal');
+        }
+
+        // ==================== 映射规则管理 ====================
+
+        function showMappingRulesModal() {
+            const container = document.getElementById('mappingRulesContent');
+
+            let html = '<table class="rules-table"><thead><tr><th style="width: 20%;">字段名</th><th style="width: 35%;">源标签</th><th style="width: 35%;">目标值</th></tr></thead><tbody>';
+
+            for (const [fieldName, fieldMap] of Object.entries(mappingRules)) {
+                const entries = Object.entries(fieldMap);
+                const rowspan = entries.length;
+
+                entries.forEach((entry, index) => {
+                    const [sourceTag, targetValue] = entry;
+                    html += '<tr>';
+                    if (index === 0) {
+                        html += `<td rowspan="${rowspan}">${fieldName}</td>`;
+                    }
+                    html += `<td><input type="text" value="${sourceTag}" onchange="updateMappingRule('${fieldName}', '${sourceTag}', 'source', this.value)"></td>`;
+                    html += `<td><input type="text" value="${targetValue}" onchange="updateMappingRule('${fieldName}', '${sourceTag}', 'target', this.value)"></td>`;
+                    html += '</tr>';
+                });
+            }
+
+            html += '</tbody></table>';
+
+            container.innerHTML = html;
+            document.getElementById('mappingRulesModal').classList.add('show');
+        }
+
+        function updateMappingRule(fieldName, oldSourceTag, field, value) {
+            const oldValue = mappingRules[fieldName][oldSourceTag];
+
+            if (field === 'source') {
+                // 更新源标签
+                delete mappingRules[fieldName][oldSourceTag];
+                mappingRules[fieldName][value] = oldValue;
+            } else {
+                // 更新目标值
+                mappingRules[fieldName][oldSourceTag] = value;
+            }
+        }
+
+        function saveMappingRules() {
+            localStorage.setItem('colmoMappingRules', JSON.stringify(mappingRules));
+            closeModal('mappingRulesModal');
+            alert('映射规则已保存');
+        }
+
+        // ==================== 配置导入导出 ====================
+
+        function exportMappingRules() {
+            const config = {
+                version: '1.0',
+                timestamp: new Date().toISOString(),
+                mappingRules: mappingRules
+            };
+
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            saveAs(blob, 'colmo_mapping_rules.json');
+        }
+
+        function importMappingRules() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const config = JSON.parse(event.target.result);
+                            if (config.mappingRules) {
+                                mappingRules = config.mappingRules;
+                                localStorage.setItem('colmoMappingRules', JSON.stringify(mappingRules));
+                                alert('映射规则导入成功！');
+                            } else {
+                                alert('配置文件格式不正确');
+                            }
+                        } catch (error) {
+                            alert('配置文件解析失败: ' + error.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            input.click();
+        }
+
+        function exportMerchantConfig() {
+            const config = {
+                version: '1.0',
+                timestamp: new Date().toISOString(),
+                merchants: merchants
+            };
+
+            const blob = new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' });
+            saveAs(blob, 'colmo_merchant_config.json');
+        }
+
+        function importMerchantConfig() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            const config = JSON.parse(event.target.result);
+                            if (config.merchants) {
+                                merchants = config.merchants;
+                                renderMerchantList();
+                                saveMerchantConfig();
+                                alert('商户配置导入成功！');
+                            } else {
+                                alert('配置文件格式不正确');
+                            }
+                        } catch (error) {
+                            alert('配置文件解析失败: ' + error.message);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+
+            input.click();
+        }
+
+        function saveMerchantConfig() {
+            localStorage.setItem('colmoMerchants', JSON.stringify(merchants));
+        }
+
+        function loadSavedConfig() {
+            try {
+                const savedMappingRules = localStorage.getItem('colmoMappingRules');
+                if (savedMappingRules) {
+                    mappingRules = JSON.parse(savedMappingRules);
+                }
+
+                const savedMerchants = localStorage.getItem('colmoMerchants');
+                if (savedMerchants) {
+                    merchants = JSON.parse(savedMerchants);
+                }
+            } catch (error) {
+                console.error('加载保存的配置失败:', error);
+            }
+        }
+
+        // ==================== 工具函数 ====================
+
+        function showProgress(type) {
+            document.getElementById(type + 'Progress').style.display = 'block';
+            document.getElementById(type + 'ProcessBtn').disabled = true;
+        }
+
+        function hideProgress(type) {
+            document.getElementById(type + 'Progress').style.display = 'none';
+            document.getElementById(type + 'ProcessBtn').disabled = false;
+        }
+
+        function updateProgress(type, percent, text) {
+            document.getElementById(type + 'ProgressBar').style.width = percent + '%';
+            document.getElementById(type + 'ProgressText').textContent = text;
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // 点击模态框外部关闭
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal')) {
+                e.target.classList.remove('show');
+            }
+        });
+    </script>
+</body>
+</html>
